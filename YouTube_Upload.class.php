@@ -2,304 +2,422 @@
 /**
  * YouTube Direct upload script, used to upload a given file directly to YouTube
  *
+ * @requires  Zend_Gdata_Youtube
+ * @requires  Zend_Gdata_ClientLogin
  **/
 
 require_once 'Zend/Loader.php';
 Zend_Loader::loadClass('Zend_Gdata_YouTube');
 Zend_Loader::loadClass('Zend_Gdata_ClientLogin');
 
+/**
+ *
+ */
 class YouTube_Upload
 {
-  protected $config = Array(
-    'yt_username'   => '[username]',
-    'yt_password'   => '[password]',
+	/**
+	 * @var array $config		An array of key configuration details
+	 */
+	protected $config = Array(
+		'yt_username'   => '', // YouTube account username
+		'yt_password'   => '', // YouTube account password
 
-    'developerKey'  => '', // https://code.google.com/apis/youtube/dashboard/gwt/index.html
-    'applicationId' => '[Text description of this application]',
-    'clientId'      => '[Text description of this application]',
+		'developerKey'  => '', // YouTube account developer key - you can get this via https://code.google.com/apis/youtube/dashboard/gwt/index.html
+		'applicationId' => '', // Text description of the application
+		'clientId'      => '' // Text description of the client
+	);
 
-    'playlistId'    => '[Playlist ID to upload videos to]',
-  );
+	/**
+	 * @var	Zend_Http_Client	$httpClient	Holds a reference to the Zend HTTP client
+	 */
+	protected $httpClient;
+	/**
+	 * @var Zend_Gdata_YouTube	$yt			Holds a reference to the Zend_Gdata_YouTube client
+	 */
+	protected $yt;
 
+	/**
+	 * @var string		$lastError	A message containing the last error text
+	 * @static
+	 */
+	public static $lastError;
 
-  protected $httpClient;
-  protected $yt;
-  protected $playlist = NULL;
+	/**
+	 * __construct ()
+	 * Constructs the YouTube_Upload class
+	 */
+	public function __construct ()
+	{
+		try
+		{
+			/**
+			 * getHttpClient expects the following:
+			 * getHttpClient(
+			 * 	$username
+			 * 	$password
+			 * 	$service
+			 * 	$client				(Zend_Gdata_HttpClient if already exists)
+			 * 	$source				(application ID)
+			 * 	$loginToken		(only required if interactive)
+			 * 	$loginCaptcha	(only required if interactive)
+			 * 	$loginUri
+			 * 	$accountType	(optional)
+			 * )
+			 */
+			$httpClient = Zend_Gdata_ClientLogin::getHttpClient(
+				$this->config['yt_username'],
+				$this->config['yt_password'],
+				'youtube',
+				NULL,
+				$this->config['applicationId'],
+				NULL,
+				NULL,
+				'https://www.google.com/accounts/ClientLogin'
+			);
+		}
+		catch ( Exception $e )
+		{
+			throw new YTUHttpClientException(__LINE__, $e);
+		}
 
-  public static $lastError;
+		try
+		{
+			$yt = new Zend_Gdata_YouTube($httpClient, $this->config['applicationId'], $this->config['clientId'], $this->config['developerKey']);
+			$yt->setMajorProtocolVersion(2);
+		}
+		catch ( Exception $e )
+		{
+			throw new YTUGdataYouTubeException(__LINE__, $e);
+		}
 
-  public function __construct ()
-  {
-    try
-    {
-      $httpClient = Zend_Gdata_ClientLogin::getHttpClient(
-        $username = $this->config['yt_username'],
-        $password = $this->config['yt_password'],
-        $service = 'youtube',
-        $client = NULL,
-        $source = 'LKK YouTube Uploader',
-        $loginToken = NULL,
-        $loginCaptcha = NULL,
-        $authUrl = 'https://www.google.com/accounts/ClientLogin'
-      );
-    }
-    catch ( Exception $e )
-    {
-      echo __LINE__, ': ', $e;
-    }
+		$this->yt         = $yt;
+		$this->httpClient = $httpClient;
+	}
 
-    try
-    {
-      $yt = new Zend_Gdata_YouTube($httpClient, $this->config['applicationId'], $this->config['clientId'], $this->config['developerKey']);
-      $yt->setMajorProtocolVersion(2);
-    }
-    catch ( Exception $e )
-    {
-      echo __LINE__, ': ', $e;
-    }
+	/**
+	 *
+	 */
+	private function getPlaylist ()
+	{
+		try
+		{
+			$playlists = $this->yt->getPlaylistListFeed('default');
+			foreach ( $playlists as $id => $playlist )
+			{
+				if ( $playlist->getPlaylistId() == $this->config['playlistId'] )
+				{
+					$this->playlist = $id;
+					break;
+				}
+			}
+		}
+		catch ( Exception $e )
+		{
+			echo __LINE__, ': ', $e;
+		}
 
-    $this->yt         = & $yt;
-    $this->httpClient = & $httpClient;
+		return $playlist;
+	}
 
-    $this->getPlaylist();
-  }
+	/**
+	 * @return array
+	 */
+	public function getVideosInPlaylist ()
+	{
+		$playlist = $this->getPlaylist($this->playlist);
 
-  private function getPlaylist ()
-  {
-    try
-    {
-      $playlists = $this->yt->getPlaylistListFeed('default');
-      foreach ( $playlists as $id => $playlist )
-        if ( $playlist->getPlaylistId() == $this->config['playlistId'] )
-        {
-          $this->playlist = $playlist;
-          break;
-        }
-    }
-    catch ( Exception $e )
-    {
-      echo __LINE__, ': ', $e;
-    }
-  }
+		echo 'Playlist URL: ', $playlist->getPlaylistVideoFeedUrl(), "\n";
+		$videos = $this->yt->getPlaylistVideoFeed($playlist->getPlaylistVideoFeedUrl());
+		$return = Array();
 
-  public function getVideosInPlaylist ()
-  {
-    echo 'Playlist URL: ', $this->playlist->getPlaylistVideoFeedUrl(), "\n";
-    $videos = $this->yt->getPlaylistVideoFeed($this->playlist->getPlaylistVideoFeedUrl());
-    $return = Array();
+		foreach ( $videos as $video )
+		{
+			$arr = Array(
+				'id'          => $video->getVideoId(),
+				'title'       => $video->getVideoTitle(),
+				'description' => $video->getVideoDescription(),
+				'category'    => $video->getVideoCategory(),
+				'tags'        => $video->getVideoTags(),
+				'duration'    => $video->getVideoDuration(),
+				'views'       => $video->getVideoViewCount(),
+				'flash_url'   => $video->getFlashPlayerUrl(),
+				'watch_url'   => $video->getVideoWatchPageUrl(),
+				'url'         => 'http://youtu.be/' . $video->getVideoId(),
+			);
 
-    foreach ( $videos as $video )
-    {
-      $arr = Array(
-        'id'          => $video->getVideoId(),
-        'title'       => $video->getVideoTitle(),
-        'description' => $video->getVideoDescription(),
-        'category'    => $video->getVideoCategory(),
-        'tags'        => $video->getVideoTags(),
-        'duration'    => $video->getVideoDuration(),
-        'views'       => $video->getVideoViewCount(),
-        'flash_url'   => $video->getFlashPlayerUrl(),
-        'watch_url'   => $video->getVideoWatchPageUrl(),
-        'url'         => 'http://youtu.be/' . $video->getVideoId(),
-      );
+			$return[] = $arr;
+		}
 
-      $return[] = $arr;
-    }
+		return $return;
+	}
 
-    return $return;
-  }
+	/**
+	 * putVideo($path, $title, $description = NULL)
+	 * Pushes a video from the server to YouTube, and adds it to the playlist if available
+	 *
+	 * @param   string $path    Physical path to video
+	 * @param   string $title   Video title
+	 * @param   Array  $extra   Additional video details
+	 *
+	 * @return  mixed  YouTube Video ID if video uploaded successfully, FALSE if error
+	 * @throws  YTUFileUnreadableException
+	 **/
+	public function putVideo ( $path, $title, Array $extra = NULL )
+	{
+		// reset last error field
+		$this->_resetLastError();
 
-  /**
-   * putVideo($path, $title, $description = NULL, $add_to_playlist = TRUE)
-   * Pushes a video from the server to YouTube, and adds it to the playlist if available
-   *
-   * @param   string $path            Path to video
-   * @param   string $title           Video title
-   * @param   string $description     Video description
-   * @param   bool   $add_to_playlist Whether or not to add the video to the given playlist too
-   *
-   * @return  mixed  YouTube Video ID if video uploaded successfully, -1 if file not found/unreadable or FALSE if error
-   **/
-  public function putVideo ( $path, $title, $description = NULL, $add_to_playlist = TRUE )
-  {
-    // reset last error field
-    $this->_resetLastError();
+		if ( !file_exists($path) || !is_readable($path) )
+		{
+			$this->_setLastError(__METHOD__, __LINE__, 'File does not exist, or file is not readable', Array( 'path' => $path ));
+			throw new YTUFileUnreadableException('File does not exist, or file is not readable');
+		}
 
-    if ( !file_exists($path) || !is_readable($path) )
-    {
-      $this->_setLastError(__METHOD__, __LINE__, 'File does not exist, or file is not readable', Array( 'path' => $path ));
+		$video = new Zend_Gdata_YouTube_VideoEntry();
 
-      return -1;
-    }
+		$src = $this->yt->newMediaFileSource($path);
+		$src->setContentType('video/mpg');
+		$src->setSlug(basename($path));
 
-    $video = new Zend_Gdata_YouTube_VideoEntry();
+		$video->setMediaSource($src);
+		$video->setVideoTitle($title);
+		if ( isset($extra['description']) )
+		{
+			$video->setVideoDescription($extra['description']);
+		}
 
-    $src = $this->yt->newMediaFileSource($path);
-    $src->setContentType('video/mpg');
-    $src->setSlug(basename($path));
+		if ( isset($extra['category']) )
+		{
+			$video->setVideoCategory($extra['category']);
+		}
 
-    $video->setMediaSource($src);
-    $video->setVideoTitle($title);
-    $video->setVideoDescription($description ? : $title);
-    $video->setVideoCategory('Howto');
-    $video->setVideoTags('lkk,recipe');
-    $video->setVideoDeveloperTags(Array( 'LKKUploader', 'Pending' ));
+		if ( isset($extra['tags']) )
+		{
+			$video->setVideoTags($extra['tags']);
+		}
 
-    try
-    {
-      // try to upload the new video
-      $new = $this->yt->insertEntry($video, 'http://uploads.gdata.youtube.com/feeds/api/users/default/uploads', 'Zend_Gdata_YouTube_VideoEntry');
+		try
+		{
+			// try to upload the new video
+			$new = $this->yt->insertEntry($video, 'http://uploads.gdata.youtube.com/feeds/api/users/default/uploads', 'Zend_Gdata_YouTube_VideoEntry');
 
-      // if uploaded, set the protocol version to 2 (required for below calls)
-      $new->setMajorProtocolVersion(2);
+			// if uploaded, set the protocol version to 2 (required for below calls)
+			$new->setMajorProtocolVersion(2);
 
-      /*
-       * Watch URL: $new->getvideoWatchPageUrl()
-       *  Video ID: $new->getVideoId()
-       */
+			/*
+			 * Watch URL: $new->getvideoWatchPageUrl()
+			 *  Video ID: $new->getVideoId()
+			 */
 
-      // check if we want to add the new video to a playlist (and that we have a playlist)
-      if ( $add_to_playlist && $this->playlist != NULL )
-      {
-        // create a playlist entry using the DOM value of the new entry
-        $playlist_entry = $this->yt->newPlaylistListEntry($new->getDOM());
+			// at this point we've succeeded, so return the new Video ID.
+			return $new->getVideoId();
+		}
+		catch ( Zend_Gdata_App_HttpException $httpException )
+		{
+			$this->_setLastError(__METHOD__, __LINE__, 'Zend HTTP Exception', Array( 'Exception' => $httpException->getRawResponseBody() ));
+		}
+		catch ( Zend_Gdata_App_Exception $e )
+		{
+			$this->_setLastError(__METHOD__, __LINE__, 'Zend App Exception', Array( 'Exception' => $e->getMessage() ));
+		}
 
-        try
-        {
-          // attempt to insert the entry
-          $this->yt->insertEntry($playlist_entry, $this->playlist->getPlaylistVideoFeedUrl());
-        }
-        catch ( Zend_App_Exception $e )
-        {
-          $this->_setLastError(__METHOD__, __LINE__, 'Could not insert new entry into playlist', Array( 'Exception' => $e->getMessage() ));
-        }
-      }
+		// if we've got here then chances are we're coming from one of the catch blocks, so we've failed
+		// :-(
+		return FALSE;
+	}
 
-      // at this point we've succeeded, so return the new Video ID.
-      return $new->getVideoId();
-    }
-    catch ( Zend_Gdata_App_HttpException $httpException )
-    {
-      $this->_setLastError(__METHOD__, __LINE__, 'Zend HTTP Exception', Array( 'Exception' => $httpException->getRawResponseBody() ));
-    }
-    catch ( Zend_Gdata_App_Exception $e )
-    {
-      $this->_setLastError(__METHOD__, __LINE__, 'Zend App Exception', Array( 'Exception' => $e->getMessage() ));
-    }
+	public function addVideoToPlaylist ( $id, $playlist = NULL )
+	{
+		// check if we want to add the new video to a playlist (and that we have a playlist)
+		$playlist = $playlist ? : $this->playlist;
 
-    // if we've got here then chances are we're coming from one of the catch blocks, so we've failed
-    // :-(
-    return FALSE;
-  }
+		if ( $playlist == NULL || $playlist == '' )
+		{
+			throw new InvalidPlaylistIdException('You must pass a valid playlist Id');
+		}
 
-  public function removeVideoFromPlaylist ( $id )
-  {
-    // if no playlist, return -1
-    if ( $this->playlist === NULL )
-    {
-      $this->_setLastError(__METHOD__, __LINE__, 'No playlist available to delete from');
+		if ( $id == '' || $id == NULL )
+		{
+			throw new InvalidArgumentException('Video ID cannot be empty');
+		}
 
-      return -1;
-    }
+		$entry = $this->yt->getVideoEntry($id, NULL, TRUE);
+		// create a playlist entry using the DOM value of the new entry
+		$playlist_entry = $this->yt->newPlaylistListEntry($entry->getDOM());
 
-    // loop each playlist entry
-    foreach ( $this->yt->getPlaylistVideoFeed($this->playlist->getPlaylistVideoFeedUrl()) as $entry )
-    {
-      // compare IDs
-      if ( $entry->getVideoId() == $id )
-      {
-        // match == delete
-        $entry->delete();
+		try
+		{
+			// attempt to insert the entry
+			$this->yt->insertEntry($playlist_entry, $this->getPlaylist($playlist)->getPlaylistVideoFeedUrl());
+		}
+		catch ( Zend_App_Exception $e )
+		{
+			$this->_setLastError(__METHOD__, __LINE__, 'Could not insert new entry into playlist', Array( 'Exception' => $e->getMessage() ));
+		}
+	}
 
-        // entry deleted. Success!
-        return TRUE;
-      }
-    }
+	/**
+	 * @param $id
+	 *
+	 * @return bool|int
+	 */
+	public function removeVideoFromPlaylist ( $id, $playlist = NULL )
+	{
+		// if no playlist, return -1
+		$playlist = $playlist ? : $this->playlist;
 
-    // nothing happened, return FALSE
-    return FALSE;
-  }
+		if ( $playlist == NULL || $playlist == '' )
+		{
+			throw new InvalidPlaylistIdException('You must pass a valid playlist Id');
+		}
 
-  /**
-   * delVideo($id)
-   * Deletes a video from the playlist & account
-   *
-   * @param   string  $id   The YouTube ID of the video to delete
-   *
-   * @return  boolean  TRUE on success, FALSE on failure
-   **/
-  public function delVideo ( $id )
-  {
-    $this->_resetLastError();
+		// loop each playlist entry
+		foreach ( $this->yt->getPlaylistVideoFeed($this->getPlaylist($playlist)->getPlaylistVideoFeedUrl()) as $entry )
+		{
+			// compare IDs
+			if ( $entry->getVideoId() == $id )
+			{
+				// match == delete
+				$entry->delete();
 
-    if ( $id == '' )
-    {
-      $this->_setLastError(__METHOD__, __LINE__, 'ID cannot be null!');
+				// entry deleted. Success!
+				return TRUE;
+			}
+		}
 
-      return FALSE;
-    }
+		// nothing happened, return FALSE
+		return FALSE;
+	}
 
-    try
-    {
-      $resp = $this->yt->delete($this->yt->getVideoEntry($id, NULL, TRUE));
-      var_dump($resp);
-      echo 'Video deleted', '<br>';
-    }
-    catch ( GDataResourceNotFoundExceptionVideo $e )
-    {
-      echo 'Video not found, presumed already deleted', '<br>';
-    }
-    catch ( Exception $e )
-    {
-      echo $e;
-    }
+	/**
+	 * removeVideo($id)
+	 * Deletes a video from the playlist & account
+	 *
+	 * @param   string  $id   The YouTube ID of the video to delete
+	 *
+	 * @return  boolean  TRUE on success, FALSE on failure
+	 * @throws	InvalidArgumentException
+	 **/
+	public function removeVideo ( $id )
+	{
+		$this->_resetLastError();
 
-    return TRUE;
-  }
+		if ( $id == '' || $id == NULL )
+		{
+			throw new InvalidArgumentException('Video ID cannot be empty');
+		}
 
-  public function updateVideo ( $id, $title, $desc )
-  {
-    if ( $id == '' )
-      return -1;
+		try
+		{
+			$resp = $this->yt->delete($this->yt->getVideoEntry($id, NULL, TRUE));
+			var_dump($resp);
+			echo 'Video deleted', '<br>';
+		}
+		catch ( GDataResourceNotFoundExceptionVideo $e )
+		{
+			echo 'Video not found, presumed already deleted', '<br>';
+		}
+		catch ( Exception $e )
+		{
+			echo $e;
+		}
 
-    $entry = $this->yt->getVideoEntry($id, NULL, TRUE);
-    $entry->setMajorProtocolVersion(2);
-    echo 'Entry ID: ', $entry->getVideoId(), "\n";
-    $entry->setVideoTitle($title);
-    $entry->setVideoDescription($desc);
-    echo 'Edit Link: ', $entry->getEditLink()->getHref(), "\n";
-    try
-    {
-      $this->yt->updateEntry($entry, $entry->getEditLink()->getHref());
-    }
-    catch ( Exception $e )
-    {
-      echo $e;
-    }
-  }
+		return TRUE;
+	}
 
-  protected function _resetLastError ()
-  {
-    self::$lastError = NULL;
-  }
+	/**
+	 * modifyVideo($id, $key, $value)
+	 *
+	 * Update a YouTube video's properties
+	 *
+	 * @param String $id       The Video ID to update
+	 * @param String $key      The property to update
+	 * @param String $value    The new value for the property
+	 *
+	 * @return bool    True on success, false on failure
+	 * @throws  InvalidArgumentException
+	 * @throws  YTUUpdateException
+	 */
+	public function modifyVideo ( $id, $key, $value = '' )
+	{
+		if ( $id == '' || $id == NULL )
+		{
+			throw new InvalidArgumentException('Video ID cannot be empty');
+		}
 
-  protected function _setLastError ( $method, $line, $error, Array $additional = NULL )
-  {
-    self::$lastError = (object)Array(
-      'Method'     => $method,
-      'Line'       => $line,
-      'Error'      => $error,
-      'Additional' => $additional
-    );
-  }
+		$entry = $this->yt->getVideoEntry($id, NULL, TRUE);
+		$entry->setMajorProtocolVersion(2);
 
-  protected static function getLastError ()
-  {
-    return self::$lastError;
-  }
+		switch ( $key )
+		{
+			case 'title':
+				$entry->setVideoTitle($value);
+				break;
+			case 'desc':
+			case 'description':
+				$entry->setVideoDescription($value);
+				break;
+		}
+
+		//echo 'Edit Link: ', $entry->getEditLink()->getHref(), "\n";
+
+		try
+		{
+			$this->yt->updateEntry($entry, $entry->getEditLink()->getHref());
+		}
+		catch ( Exception $e )
+		{
+			throw new YTUUpdateException($e);
+		}
+	}
+
+	/**
+	 * @param       $method
+	 * @param       $line
+	 * @param       $error
+	 * @param array $additional
+	 */
+	protected function _setLastError ( $method, $line, $error, Array $additional = NULL )
+	{
+		self::$lastError = (object) Array(
+			'Method'     => $method,
+			'Line'       => $line,
+			'Error'      => $error,
+			'Additional' => $additional
+		);
+	}
+
+	/**
+	 * Resets the last error
+	 */
+	protected function _resetLastError ()
+	{
+		self::$lastError = NULL;
+	}
+
+	/**
+	 * @return mixed
+	 */
+	protected static function getLastError ()
+	{
+		return self::$lastError;
+	}
 }
 
 
-class YouTubeFileUnreadableException extends Exception
+/**
+ *
+ */
+class YTUFileUnreadableException extends Exception
 {
 }
+
+class YTUUpdateException extends Exception
+{
+}
+
+class YTUHttpClientException extends Exception
+{
+}
+
+class YTUGdataYouTubeException extends Exception {}
