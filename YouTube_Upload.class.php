@@ -97,38 +97,56 @@ class YouTube_Upload
 	}
 
 	/**
-	 * putVideo($path, $title, Array $extra = NULL)
-	 * Pushes a video from the server to YouTube
-	 *
+	 * getPlaylist ( $pid )
+	 * Gets a playlist by ID
+   *
+   * @param String $pid Playlist ID to find
+   * @return mixed Zend_Gdata_YouTube_PlaylistListEntry if playlist found, otherwise FALSE.
+   * @throws IllegalArgumentException
 	 */
-	private function getPlaylist ()
-	{
+	private function getPlaylist ( $pid )
+  {
+    if ( !isset($id) )
+    {
+      throw new IllegalArgumentException('Must provide a valid playlist ID');
+    }
+
+    // try find the playlist
 		try
 		{
 			$playlists = $this->yt->getPlaylistListFeed('default');
 			foreach ( $playlists as $id => $playlist )
 			{
-				if ( $playlist->getPlaylistId() == $this->config['playlistId'] )
+				if ( $playlist->getPlaylistId() == $pid )
 				{
-					$this->playlist = $id;
-					break;
+					return $playlist;
 				}
 			}
 		}
 		catch ( Exception $e )
 		{
 			echo __LINE__, ': ', $e;
-		}
+    }
 
-		return $playlist;
+    return FALSE;
 	}
 
-	/**
-	 * @return array
+  /**
+   * getVideosInPlaylist ( $id )
+   * Gets a list of videos in the provided playlist
+   *
+   * @param String  $pid  Playlist ID
+   * @return Array An array of the videos in the playlist
+   * @throws IllegalArgumentException
 	 */
 	public function getVideosInPlaylist ()
-	{
-		$playlist = $this->getPlaylist($this->playlist);
+  {
+    if ( !isset($id) )
+    {
+      throw new IllegalArgumentException('Must provide a valid playlist ID');
+    }
+
+		$playlist = $this->getPlaylist($pid);
 
 		echo 'Playlist URL: ', $playlist->getPlaylistVideoFeedUrl(), "\n";
 		$videos = $this->yt->getPlaylistVideoFeed($playlist->getPlaylistVideoFeedUrl());
@@ -159,7 +177,7 @@ class YouTube_Upload
 	 * putVideo($path, $title, $description = NULL)
 	 * Pushes a video from the server to YouTube, and adds it to the playlist if available
 	 *
-	 * @param   string $path    Physical path to video
+	 * @param   string $path    Physical path to video on the source server
 	 * @param   string $title   Video title
 	 * @param   Array  $extra   Additional video details (description|category|tags)
 	 *
@@ -234,7 +252,7 @@ class YouTube_Upload
 		return FALSE;
 	}
 
-	public function addVideoToPlaylist ( $id, $playlist = NULL )
+	public function addVideoToPlaylist ( $vid, $playlist = NULL )
 	{
 		// check if we want to add the new video to a playlist (and that we have a playlist)
 
@@ -243,12 +261,12 @@ class YouTube_Upload
 			throw new InvalidArgumentException('You must pass a valid playlist Id');
 		}
 
-		if ( $id == NULL || $id == '' )
+		if ( $vid == NULL || $vid == '' )
 		{
 			throw new InvalidArgumentException('Video ID cannot be empty');
 		}
 
-    $entry = $this->yt->getVideoEntry($id, NULL, TRUE);
+    $entry = $this->yt->getVideoEntry($vid, NULL, TRUE);
 
 		// create a playlist entry using the DOM value of the new entry
 		$playlist_entry = $this->yt->newPlaylistListEntry($entry->getDOM());
@@ -271,9 +289,6 @@ class YouTube_Upload
 	 */
 	public function removeVideoFromPlaylist ( $id, $playlist = NULL )
 	{
-		// if no playlist, return -1
-		$playlist = $playlist ? : $this->playlist;
-
 		if ( $playlist == NULL || $playlist == '' )
 		{
 			throw new InvalidPlaylistIdException('You must pass a valid playlist Id');
