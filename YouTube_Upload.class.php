@@ -23,8 +23,8 @@ class YouTube_Upload
 		'yt_password'   => '', // YouTube account password
 
 		'developerKey'  => '', // YouTube account developer key - you can get this via https://code.google.com/apis/youtube/dashboard/gwt/index.html
-		'applicationId' => '', // Text description of the application
-		'clientId'      => '' // Text description of the client
+		'applicationId' => '', // Text description of the application (e.g. "My-YouTube-uploader")
+		'clientId'      => '' // Text description of the client (e.g. "My-YouTube-client") - both applicationID and clientID are just arbitrary strings 
 	);
 
 	/**
@@ -55,7 +55,7 @@ class YouTube_Upload
 			 * getHttpClient(
 			 * 	$username
 			 * 	$password
-			 * 	$service
+			 * 	$service      (Which Google service is required)
 			 * 	$client				(Zend_Gdata_HttpClient if already exists)
 			 * 	$source				(application ID)
 			 * 	$loginToken		(only required if interactive)
@@ -80,6 +80,7 @@ class YouTube_Upload
 			throw new YTUHttpClientException(__LINE__, $e);
 		}
 
+    // successfully logged in, so now we try to open a reference to the YouTube api (V2)
 		try
 		{
 			$yt = new Zend_Gdata_YouTube($httpClient, $this->config['applicationId'], $this->config['clientId'], $this->config['developerKey']);
@@ -90,11 +91,14 @@ class YouTube_Upload
 			throw new YTUGdataYouTubeException(__LINE__, $e);
 		}
 
+    // set the variables
 		$this->yt         = $yt;
 		$this->httpClient = $httpClient;
 	}
 
 	/**
+	 * putVideo($path, $title, Array $extra = NULL)
+	 * Pushes a video from the server to YouTube
 	 *
 	 */
 	private function getPlaylist ()
@@ -157,7 +161,7 @@ class YouTube_Upload
 	 *
 	 * @param   string $path    Physical path to video
 	 * @param   string $title   Video title
-	 * @param   Array  $extra   Additional video details
+	 * @param   Array  $extra   Additional video details (description|category|tags)
 	 *
 	 * @return  mixed  YouTube Video ID if video uploaded successfully, FALSE if error
 	 * @throws  YTUFileUnreadableException
@@ -167,12 +171,14 @@ class YouTube_Upload
 		// reset last error field
 		$this->_resetLastError();
 
+    // can't read the path
 		if ( !file_exists($path) || !is_readable($path) )
 		{
 			$this->_setLastError(__METHOD__, __LINE__, 'File does not exist, or file is not readable', Array( 'path' => $path ));
 			throw new YTUFileUnreadableException('File does not exist, or file is not readable');
 		}
 
+    // create a new Zend space
 		$video = new Zend_Gdata_YouTube_VideoEntry();
 
 		$src = $this->yt->newMediaFileSource($path);
@@ -180,7 +186,9 @@ class YouTube_Upload
 		$src->setSlug(basename($path));
 
 		$video->setMediaSource($src);
-		$video->setVideoTitle($title);
+    $video->setVideoTitle($title);
+
+    // add in the extra details
 		if ( isset($extra['description']) )
 		{
 			$video->setVideoDescription($extra['description']);
@@ -198,7 +206,7 @@ class YouTube_Upload
 
 		try
 		{
-			// try to upload the new video
+			// try to upload the new video - this may take a while
 			$new = $this->yt->insertEntry($video, 'http://uploads.gdata.youtube.com/feeds/api/users/default/uploads', 'Zend_Gdata_YouTube_VideoEntry');
 
 			// if uploaded, set the protocol version to 2 (required for below calls)
@@ -221,7 +229,7 @@ class YouTube_Upload
 			$this->_setLastError(__METHOD__, __LINE__, 'Zend App Exception', Array( 'Exception' => $e->getMessage() ));
 		}
 
-		// if we've got here then chances are we're coming from one of the catch blocks, so we've failed
+		// if we've got here then we're coming from one of the catch blocks, so we've failed
 		// :-(
 		return FALSE;
 	}
@@ -229,19 +237,19 @@ class YouTube_Upload
 	public function addVideoToPlaylist ( $id, $playlist = NULL )
 	{
 		// check if we want to add the new video to a playlist (and that we have a playlist)
-		$playlist = $playlist ? : $this->playlist;
 
 		if ( $playlist == NULL || $playlist == '' )
 		{
-			throw new InvalidPlaylistIdException('You must pass a valid playlist Id');
+			throw new InvalidArgumentException('You must pass a valid playlist Id');
 		}
 
-		if ( $id == '' || $id == NULL )
+		if ( $id == NULL || $id == '' )
 		{
 			throw new InvalidArgumentException('Video ID cannot be empty');
 		}
 
-		$entry = $this->yt->getVideoEntry($id, NULL, TRUE);
+    $entry = $this->yt->getVideoEntry($id, NULL, TRUE);
+
 		// create a playlist entry using the DOM value of the new entry
 		$playlist_entry = $this->yt->newPlaylistListEntry($entry->getDOM());
 
